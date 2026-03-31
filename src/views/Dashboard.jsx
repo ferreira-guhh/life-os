@@ -13,13 +13,20 @@ export function DashboardView() {
     xpProgress, 
     nextLevelXp, 
     xpProgressPercent,
-    executeReward 
+    executeReward,
+    removeXp,
+    totalXp,
+    totalGold
   } = useContext(AppContext);
   const { tasks, toggleTask, addTask, removeTask, summary } =
     useContext(FinanceContext);
   const [showAdd, setShowAdd] = useState(false);
   const [newTime, setNewTime] = useState("09:00");
   const [newLabel, setNewLabel] = useState("");
+  
+  // State para undo de desmarcações com timeout
+  const [undoAction, setUndoAction] = useState(null); // { taskId, timeoutId, message }
+  const [undoNotification, setUndoNotification] = useState(null);
 
   const completed = tasks.filter((t) => t.done).length;
   const progress = tasks.length
@@ -33,21 +40,82 @@ export function DashboardView() {
     setShowAdd(false);
   };
 
-  // Integração: Tarefa ➔ XP ➔ Ouro
+  // Integração: Tarefa ➔ XP ➔ Ouro (com Undo)
+  // FLUXO: Mark = +10 XP IMEDIATO | Unmark = Agendar -10 XP em 3s com opção de desfazer
   const handleToggleTask = (taskId) => {
     const task = tasks.find(t => t.id === taskId);
-    const isCompleting = !task.done; // true = marcando como feito
+    if (!task) return;
 
-    // Toggle a tarefa
+    // ✅ Capturar estado ANTES de fazer toggle
+    const wasDone = task.done; // true = tarefa estava marcada
+
+    // Limpar undo anterior se houver
+    if (undoAction && undoAction.taskId === taskId) {
+      clearTimeout(undoAction.timeoutId);
+      setUndoAction(null);
+      setUndoNotification(null);
+    }
+
+    // ✅ Toggle imediato (muda o estado)
     toggleTask(taskId);
 
-    // Se está marcando como feito, ganha XP
-    if (isCompleting) {
+    if (!wasDone) {
+      // ✅ MARCANDO (era false, agora é true) = GANHA XP IMEDIATO
       const reward = executeReward('SIMPLE_TASK');
       if (reward) {
-        console.log(`✅ Tarefa: "${task.label}" | ${reward.message}`);
+        console.log(`✅ +${reward.xp} XP: "${task.label}"`);
       }
+    } else {
+      // ❌ DESMARCANDO (era true, agora é false) = AGENDAR -XP em 3s (com undo)
+      console.log(`⚠️ Desmarque em 3s removerá XP: "${task.label}" | XP atual: ${totalXp}`);
+      
+      const timeoutId = setTimeout(async () => {
+        console.log(`⏰ [${new Date().toLocaleTimeString()}] Trigger de remoção de XP!`);
+        console.log(`   Chamando removeXp(10) com XP atual no contexto: ${totalXp}`);
+        
+        // ✅ Chamar removeXp que vai usar o estado MAIS RECENTE
+        const rollback = await removeXp(10);
+        
+        console.log(`✅ removeXp retornou:`, rollback);
+        
+        if (rollback.success) {
+          console.log(`✅ XP REMOVIDO COM SUCESSO: "${task.label}"`);
+          console.log(`   Novo XP: ${rollback.newXp}`);
+        } else {
+          console.error(`❌ removeXp falhou:`, rollback.message);
+        }
+        
+        // Limpar notificação
+        setUndoNotification(null);
+        setUndoAction(null);
+      }, 3000);
+
+      // Mostrar notificação com opção de desfazer
+      setUndoAction({ taskId, timeoutId });
+      setUndoNotification({
+        taskId,
+        message: `Desmarque em 3s removerá -10 XP`,
+        taskName: task.label
+      });
     }
+  };
+
+  // Função para desfazer undo (remarcar tarefa)
+  const handleUndoUnmark = (taskId) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || undoAction?.taskId !== taskId) return;
+
+    // Cancelar timeout
+    clearTimeout(undoAction.timeoutId);
+    setUndoAction(null);
+    setUndoNotification(null);
+
+    // Remarcar tarefa
+    toggleTask(taskId);
+    
+    // Recuperar XP
+    const reward = executeReward('SIMPLE_TASK');
+    console.log(`🔄 Desfez desmarque: "${task.label}" | ${reward.message}`);
   };
 
   const sortedTasks = [...tasks].sort((a, b) =>
@@ -140,6 +208,26 @@ export function DashboardView() {
             <Plus size={15} /> Adicionar
           </Button>
         </div>
+
+        {/* Notificação de Undo */}
+        {undoNotification && (
+          <Card className="mb-3 p-3 bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-amber-400">⏱️ Undo disponível por 3s</p>
+              <p className="text-sm text-amber-300 mt-1">
+                "{undoNotification.taskName}" será desfeito com -10 XP
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleUndoUnmark(undoNotification.taskId)}
+              className="whitespace-nowrap"
+            >
+              🔄 Desfazer
+            </Button>
+          </Card>
+        )}
 
         {showAdd && (
           <Card className="mb-3 space-y-3">

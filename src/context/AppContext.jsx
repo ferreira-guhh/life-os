@@ -240,6 +240,83 @@ export function AppProvider({ children }) {
     }
   }, [addXp, addGold]);
 
+  // Remover XP (Rollback - ao desmarcar tarefa)
+  const removeXp = useCallback(async (amount) => {
+    console.log(`📊 removeXp chamada com amount=${amount}`);
+    console.log(`   XP atual ANTES: ${totalXp}`);
+    console.log(`   Gold atual ANTES: ${totalGold}`);
+    
+    try {
+      // Garantir que não fique negativo
+      const newXpAmount = Math.max(0, totalXp - amount);
+      const newGoldAmount = Math.max(0, totalGold - Math.floor(amount / 2));
+
+      console.log(`   Calculado: newXp=${newXpAmount}, newGold=${newGoldAmount}`);
+
+      // Recalcular nível com novo XP
+      let newLevel = 1;
+      let xpSpentLoop = 0;
+      while (xpSpentLoop + getXpForLevel(newLevel + 1) <= newXpAmount) {
+        xpSpentLoop += getXpForLevel(newLevel + 1);
+        newLevel += 1;
+      }
+
+      console.log(`   Nível calculado: ${newLevel}`);
+
+      // ✅ SEMPRE atualizar estado local PRIMEIRO (garantido)
+      console.log(`   Atualizando estado local...`);
+      setTotalXp(newXpAmount);
+      setTotalGold(newGoldAmount);
+      console.log(`   ✅ Estado local atualizado!`);
+
+      // ⏳ Tentar sincronizar com Supabase (background)
+      if (userStats) {
+        console.log(`   Tentando sincronizar com Supabase...`);
+        const { error } = await supabase
+          .from('user_profile')
+          .update({ 
+            current_xp: newXpAmount,
+            current_level: newLevel,
+            total_gold: newGoldAmount 
+          })
+          .eq('id', userId);
+
+        if (error) {
+          console.error('   ⚠️ Supabase falhou:', error);
+          console.log('   ✅ Mas estado local foi atualizado com sucesso');
+        } else {
+          console.log(`   ✅ Supabase sincronizado!`);
+        }
+      } else {
+        console.log(`   ℹ️ userStats não carregado, sincronização saltada`);
+      }
+
+      console.log(`✅ -${amount} XP removido com sucesso | Novo: ${newXpAmount}`);
+      
+      return {
+        success: true,
+        message: `-${amount} XP | -${Math.floor(amount / 2)} ⭐`,
+        newXp: newXpAmount,
+        newGold: newGoldAmount
+      };
+
+    } catch (err) {
+      console.error('❌ Erro inesperado ao remover XP:', err);
+      
+      // Fallback: fazer manualmente
+      const newXpAmount = Math.max(0, totalXp - amount);
+      const newGoldAmount = Math.max(0, totalGold - Math.floor(amount / 2));
+      setTotalXp(newXpAmount);
+      setTotalGold(newGoldAmount);
+      
+      return { 
+        success: true, 
+        message: `Removido (offline): -${amount} XP`,
+        newXp: newXpAmount 
+      };
+    }
+  }, [totalXp, totalGold, userStats, userId]);
+
   return (
     <AppContext.Provider 
       value={{ 
@@ -251,6 +328,7 @@ export function AppProvider({ children }) {
         // XP e Leveling
         totalXp,
         addXp,
+        removeXp,
         currentLevel,
         xpProgress,
         nextLevelXp,
