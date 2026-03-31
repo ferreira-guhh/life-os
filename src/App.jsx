@@ -5,6 +5,7 @@ import { BottomNav } from "./components/BottomNav";
 import { DashboardView } from "./views/Dashboard";
 import { FinanceView } from "./views/Finance";
 import { FocusView } from "./views/Focus";
+import { StoreView } from "./views/Store";
 import './index.css'
 
 function AppShell() {
@@ -13,6 +14,7 @@ function AppShell() {
   const views = {
     dashboard: DashboardView,
     finance: FinanceView,
+    store: StoreView,
     focus: FocusView,
   };
 

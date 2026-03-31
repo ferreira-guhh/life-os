@@ -1,5 +1,5 @@
-import { createContext, useCallback } from "react";
-import { useLocalStorage } from "../hooks/useLocalStorage";
+import { createContext, useCallback, useState, useEffect } from "react";
+import { supabase } from "../lib/supabase";
 
 export const FinanceContext = createContext(null);
 
@@ -27,56 +27,147 @@ const DEFAULT_TRANSACTIONS = [
   { id: 4, label: "Transporte", type: "expense", category: "essencial", expected: 300, actual: 280, date: "2026-03-29" },
 ];
 
+const DEFAULT_GOALS = [
+  { id: 1, name: "RTX 4060", target: 2000, current: 0, deadline: "2026-06" },
+  { id: 2, name: "Ryzen 5 5600X", target: 1200, current: 0, deadline: "2026-05" }
+];
+
 export function FinanceProvider({ children }) {
-  const [transactions, setTransactions] = useLocalStorage(
-    "lifeos_transactions",
-    DEFAULT_TRANSACTIONS
-  );
-  const [tasks, setTasks] = useLocalStorage("lifeos_tasks", DEFAULT_TASKS);
+  const [transactions, setTransactions] = useState([]);
+  const [tasks, setTasks] = useState(DEFAULT_TASKS);
+  const [goals, setGoals] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const addTransaction = useCallback(
-    (tx) => {
-      setTransactions((prev) => [
-        ...prev, 
-        { 
-          ...tx, 
-          id: Date.now(), 
-          date: new Date().toISOString().split('T')[0] // Salva ex: "2026-03-30"
-        }
-      ]);
-    },
-    [setTransactions]
-  );
+  // 1. Buscar transações ao carregar
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+      
+      if (!error && data) {
+        setTransactions(data);
+      } else {
+        // Fallback para dados padrão se houver erro
+        setTransactions(DEFAULT_TRANSACTIONS);
+      }
+      setLoading(false);
+    };
+    fetchTransactions();
+  }, []);
 
-  const removeTransaction = useCallback(
-    (id) => {
-      setTransactions((prev) => prev.filter((t) => t.id !== id));
-    },
-    [setTransactions]
-  );
+  // 2. Buscar metas ao carregar
+  useEffect(() => {
+    const fetchGoals = async () => {
+      const { data, error } = await supabase
+        .from('goals')
+        .select('*')
+        .order('deadline', { ascending: true });
+      
+      if (!error && data) {
+        setGoals(data);
+      } else {
+        setGoals(DEFAULT_GOALS);
+      }
+    };
+    fetchGoals();
+  }, []);
 
-  const toggleTask = useCallback(
-    (id) => {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t))
-      );
-    },
-    [setTasks]
-  );
+  // 3. Adicionar transação no banco
+  const addTransaction = useCallback(async (tx) => {
+    const newTx = {
+      ...tx,
+      date: new Date().toISOString().split('T')[0]
+    };
 
-  const addTask = useCallback(
-    (task) => {
-      setTasks((prev) => [...prev, { ...task, id: Date.now(), done: false }]);
-    },
-    [setTasks]
-  );
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert([newTx])
+      .select();
 
-  const removeTask = useCallback(
-    (id) => {
-      setTasks((prev) => prev.filter((t) => t.id !== id));
-    },
-    [setTasks]
-  );
+    if (!error && data) {
+      setTransactions(prev => [data[0], ...prev]);
+    }
+  }, []);
+
+  // 4. Remover transação do banco
+  const removeTransaction = useCallback(async (id) => {
+    const { error } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('id', id);
+
+    if (!error) {
+      setTransactions(prev => prev.filter(t => t.id !== id));
+    }
+  }, []);
+
+  // 5. Adicionar meta no banco
+  const addGoal = useCallback(async (goal) => {
+    const newGoal = {
+      ...goal,
+      current: 0
+    };
+
+    const { data, error } = await supabase
+      .from('goals')
+      .insert([newGoal])
+      .select();
+
+    if (!error && data) {
+      setGoals(prev => [...prev, data[0]]);
+    }
+  }, []);
+
+  // 6. Remover meta do banco
+  const removeGoal = useCallback(async (id) => {
+    const { error } = await supabase
+      .from('goals')
+      .delete()
+      .eq('id', id);
+
+    if (!error) {
+      setGoals(prev => prev.filter(g => g.id !== id));
+    }
+  }, []);
+
+  // 7. Atualizar progresso da meta no banco
+  const updateGoalProgress = useCallback(async (id, amount) => {
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return;
+
+    const newCurrent = Math.max(0, goal.current + amount);
+
+    const { error } = await supabase
+      .from('goals')
+      .update({ current: newCurrent })
+      .eq('id', id);
+
+    if (!error) {
+      setGoals(prev => prev.map(g =>
+        g.id === id ? { ...g, current: newCurrent } : g
+      ));
+    }
+  }, [goals]);
+
+  // 8. Toggle task (local apenas)
+  const toggleTask = useCallback((id) => {
+    setTasks(prev =>
+      prev.map(t => (t.id === id ? { ...t, done: !t.done } : t))
+    );
+  }, []);
+
+  // 9. Adicionar task (local apenas)
+  const addTask = useCallback((task) => {
+    setTasks(prev => [...prev, { ...task, id: Date.now(), done: false }]);
+  }, []);
+
+  // 10. Remover task (local apenas)
+  const removeTask = useCallback((id) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }, []);
 
   const summary = {
     totalIncome: transactions
@@ -99,11 +190,15 @@ export function FinanceProvider({ children }) {
       value={{
         transactions,
         tasks,
+        goals,
         addTransaction,
         removeTransaction,
         toggleTask,
         addTask,
         removeTask,
+        updateGoalProgress,
+        addGoal,
+        removeGoal,
         summary,
       }}
     >

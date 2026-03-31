@@ -1,5 +1,5 @@
 import { useContext } from "react";
-import { LayoutDashboard, Wallet, Timer } from "lucide-react";
+import { LayoutDashboard, Wallet, Timer, Gift } from "lucide-react";
 import { AppContext } from "../context/AppContext";
 
 export function BottomNav() {
@@ -8,6 +8,7 @@ export function BottomNav() {
   const tabs = [
     { id: "dashboard", label: "Início", Icon: LayoutDashboard },
     { id: "finance", label: "Finanças", Icon: Wallet },
+    { id: "store", label: "Loja", Icon: Gift },
     { id: "focus", label: "Foco", Icon: Timer },
   ];
 

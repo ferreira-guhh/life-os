@@ -6,7 +6,15 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 
 export function DashboardView() {
-  const { dateStr, setView } = useContext(AppContext);
+  const { 
+    dateStr, 
+    setView, 
+    currentLevel, 
+    xpProgress, 
+    nextLevelXp, 
+    xpProgressPercent,
+    executeReward 
+  } = useContext(AppContext);
   const { tasks, toggleTask, addTask, removeTask, summary } =
     useContext(FinanceContext);
   const [showAdd, setShowAdd] = useState(false);
@@ -25,6 +33,23 @@ export function DashboardView() {
     setShowAdd(false);
   };
 
+  // Integração: Tarefa ➔ XP ➔ Ouro
+  const handleToggleTask = (taskId) => {
+    const task = tasks.find(t => t.id === taskId);
+    const isCompleting = !task.done; // true = marcando como feito
+
+    // Toggle a tarefa
+    toggleTask(taskId);
+
+    // Se está marcando como feito, ganha XP
+    if (isCompleting) {
+      const reward = executeReward('SIMPLE_TASK');
+      if (reward) {
+        console.log(`✅ Tarefa: "${task.label}" | ${reward.message}`);
+      }
+    }
+  };
+
   const sortedTasks = [...tasks].sort((a, b) =>
     a.time.localeCompare(b.time)
   );
@@ -38,6 +63,33 @@ export function DashboardView() {
           Bom dia, Dev <span className="wave">👋</span>
         </h1>
       </div>
+
+      {/* Level Widget */}
+      <Card className="flex items-center gap-4 border-amber-500/30">
+        <div className="relative w-16 h-16 flex items-center justify-center flex-shrink-0">
+          <svg className="absolute w-full h-full -rotate-90">
+            {/* Fundo do círculo */}
+            <circle cx="32" cy="32" r="28" fill="none" stroke="#27272a" strokeWidth="4" />
+            {/* Progresso (amarelo) */}
+            <circle 
+              cx="32" 
+              cy="32" 
+              r="28" 
+              fill="none" 
+              stroke="#f59e0b" 
+              strokeWidth="4"
+              strokeDasharray="175" 
+              strokeDashoffset={175 - (xpProgressPercent * 1.75)}
+              className="transition-all duration-1000"
+            />
+          </svg>
+          <span className="text-xl font-bold text-white">Lvl {currentLevel}</span>
+        </div>
+        <div>
+          <p className="text-xs text-zinc-500 uppercase font-bold">Patente Atual</p>
+          <p className="text-sm text-amber-400 font-mono">{xpProgress} / {nextLevelXp} XP</p>
+        </div>
+      </Card>
 
       {/* Stats Row */}
       <div className="grid grid-cols-3 gap-3">
@@ -134,7 +186,7 @@ export function DashboardView() {
               }`}
             >
               <button
-                onClick={() => toggleTask(task.id)}
+                onClick={() => handleToggleTask(task.id)}
                 className="text-zinc-500 hover:text-amber-400 transition-colors shrink-0"
               >
                 {task.done ? (
