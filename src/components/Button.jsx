@@ -5,6 +5,8 @@ export function Button({
   size = "md",
   className = "",
   disabled = false,
+  type = "button",
+  ...props
 }) {
   const base =
     "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-40";
@@ -22,9 +24,11 @@ export function Button({
 
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
       className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}
+      {...props}
     >
       {children}
     </button>

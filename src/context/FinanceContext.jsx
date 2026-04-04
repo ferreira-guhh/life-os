@@ -1,188 +1,279 @@
-import { createContext, useCallback, useState, useEffect } from "react";
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 export const FinanceContext = createContext(null);
 
 export const CATEGORIES = [
-  { id: 'essencial', label: 'Essencial', color: '#818cf8' },
-  { id: 'educacao', label: 'Educação', color: '#fbbf24' },
-  { id: 'lazer', label: 'Lazer', color: '#f472b6' },
-  { id: 'saude', label: 'Saúde', color: '#34d399' },
-  { id: 'investimento', label: 'Investimento', color: '#a78bfa' },
-  { id: 'outros', label: 'Outros', color: '#94a3b8' }
+  { id: "essencial", label: "Essencial", color: "#818cf8" },
+  { id: "educacao", label: "Educacao", color: "#fbbf24" },
+  { id: "lazer", label: "Lazer", color: "#f472b6" },
+  { id: "saude", label: "Saude", color: "#34d399" },
+  { id: "investimento", label: "Investimento", color: "#a78bfa" },
+  { id: "outros", label: "Outros", color: "#94a3b8" },
 ];
 
 const DEFAULT_TASKS = [
-  { id: 1, time: "06:00", label: "Acordar & Exercitar", done: false },
-  { id: 2, time: "08:00", label: "Estudar / Deep Work", done: false },
-  { id: 3, time: "12:00", label: "Almoço & Pausa", done: false },
-  { id: 4, time: "14:00", label: "Reuniões / Tarefas", done: false },
-  { id: 5, time: "18:00", label: "Review do dia", done: false },
+  {
+    id: 1,
+    time: "06:00",
+    label: "Acordar & Exercitar",
+    done: false,
+    reward_meta: null,
+  },
+  {
+    id: 2,
+    time: "08:00",
+    label: "Estudar / Deep Work",
+    done: false,
+    reward_meta: null,
+  },
+  {
+    id: 3,
+    time: "12:00",
+    label: "Almoco & Pausa",
+    done: false,
+    reward_meta: null,
+  },
+  {
+    id: 4,
+    time: "14:00",
+    label: "Reunioes / Tarefas",
+    done: false,
+    reward_meta: null,
+  },
+  {
+    id: 5,
+    time: "18:00",
+    label: "Review do dia",
+    done: false,
+    reward_meta: null,
+  },
 ];
 
 const DEFAULT_TRANSACTIONS = [
-  { id: 1, label: "Salário", type: "income", category: "outros", expected: 5000, actual: 5000, date: "2026-03-30" },
-  { id: 2, label: "Aluguel", type: "expense", category: "essencial", expected: 1500, actual: 1500, date: "2026-03-01" },
-  { id: 3, label: "Alimentação", type: "expense", category: "essencial", expected: 800, actual: 950, date: "2026-03-28" },
-  { id: 4, label: "Transporte", type: "expense", category: "essencial", expected: 300, actual: 280, date: "2026-03-29" },
+  {
+    id: 1,
+    label: "Salario",
+    type: "income",
+    category: "outros",
+    expected: 5000,
+    actual: 5000,
+    date: "2026-03-30",
+  },
+  {
+    id: 2,
+    label: "Aluguel",
+    type: "expense",
+    category: "essencial",
+    expected: 1500,
+    actual: 1500,
+    date: "2026-03-01",
+  },
+  {
+    id: 3,
+    label: "Alimentacao",
+    type: "expense",
+    category: "essencial",
+    expected: 800,
+    actual: 950,
+    date: "2026-03-28",
+  },
+  {
+    id: 4,
+    label: "Transporte",
+    type: "expense",
+    category: "essencial",
+    expected: 300,
+    actual: 280,
+    date: "2026-03-29",
+  },
 ];
 
 const DEFAULT_GOALS = [
   { id: 1, name: "RTX 4060", target: 2000, current: 0, deadline: "2026-06" },
-  { id: 2, name: "Ryzen 5 5600X", target: 1200, current: 0, deadline: "2026-05" }
+  {
+    id: 2,
+    name: "Ryzen 5 5600X",
+    target: 1200,
+    current: 0,
+    deadline: "2026-05",
+  },
 ];
+
+const createTaskId = () => {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
 
 export function FinanceProvider({ children }) {
   const [transactions, setTransactions] = useState([]);
   const [tasks, setTasks] = useState(DEFAULT_TASKS);
   const [goals, setGoals] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  // 1. Buscar transações ao carregar
   useEffect(() => {
     const fetchTransactions = async () => {
-      setLoading(true);
       const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .order('date', { ascending: false });
-      
+        .from("transactions")
+        .select("*")
+        .order("date", { ascending: false });
+
       if (!error && data) {
         setTransactions(data);
       } else {
-        // Fallback para dados padrão se houver erro
         setTransactions(DEFAULT_TRANSACTIONS);
       }
-      setLoading(false);
     };
-    fetchTransactions();
+
+    void fetchTransactions();
   }, []);
 
-  // 2. Buscar metas ao carregar
   useEffect(() => {
     const fetchGoals = async () => {
       const { data, error } = await supabase
-        .from('goals')
-        .select('*')
-        .order('deadline', { ascending: true });
-      
+        .from("goals")
+        .select("*")
+        .order("deadline", { ascending: true });
+
       if (!error && data) {
         setGoals(data);
       } else {
         setGoals(DEFAULT_GOALS);
       }
     };
-    fetchGoals();
+
+    void fetchGoals();
   }, []);
 
-  // 3. Adicionar transação no banco
   const addTransaction = useCallback(async (tx) => {
     const newTx = {
       ...tx,
-      date: new Date().toISOString().split('T')[0]
+      expected: Number(tx.expected ?? 0),
+      actual: Number(tx.actual ?? 0),
+      date: new Date().toISOString().split("T")[0],
     };
 
     const { data, error } = await supabase
-      .from('transactions')
+      .from("transactions")
       .insert([newTx])
       .select();
 
     if (!error && data) {
-      setTransactions(prev => [data[0], ...prev]);
+      setTransactions((previous) => [data[0], ...previous]);
     }
   }, []);
 
-  // 4. Remover transação do banco
   const removeTransaction = useCallback(async (id) => {
     const { error } = await supabase
-      .from('transactions')
+      .from("transactions")
       .delete()
-      .eq('id', id);
+      .eq("id", id);
 
     if (!error) {
-      setTransactions(prev => prev.filter(t => t.id !== id));
+      setTransactions((previous) =>
+        previous.filter((transaction) => transaction.id !== id)
+      );
     }
   }, []);
 
-  // 5. Adicionar meta no banco
   const addGoal = useCallback(async (goal) => {
     const newGoal = {
       ...goal,
-      current: 0
+      current: 0,
     };
 
-    const { data, error } = await supabase
-      .from('goals')
-      .insert([newGoal])
-      .select();
+    const { data, error } = await supabase.from("goals").insert([newGoal]).select();
 
     if (!error && data) {
-      setGoals(prev => [...prev, data[0]]);
+      setGoals((previous) => [...previous, data[0]]);
     }
   }, []);
 
-  // 6. Remover meta do banco
   const removeGoal = useCallback(async (id) => {
-    const { error } = await supabase
-      .from('goals')
-      .delete()
-      .eq('id', id);
+    const { error } = await supabase.from("goals").delete().eq("id", id);
 
     if (!error) {
-      setGoals(prev => prev.filter(g => g.id !== id));
+      setGoals((previous) => previous.filter((goal) => goal.id !== id));
     }
   }, []);
 
-  // 7. Atualizar progresso da meta no banco
-  const updateGoalProgress = useCallback(async (id, amount) => {
-    const goal = goals.find(g => g.id === id);
-    if (!goal) return;
+  const updateGoalProgress = useCallback(
+    async (id, amount) => {
+      const goal = goals.find((entry) => entry.id === id);
 
-    const newCurrent = Math.max(0, goal.current + amount);
+      if (!goal) {
+        return;
+      }
 
-    const { error } = await supabase
-      .from('goals')
-      .update({ current: newCurrent })
-      .eq('id', id);
+      const newCurrent = Math.max(0, goal.current + amount);
 
-    if (!error) {
-      setGoals(prev => prev.map(g =>
-        g.id === id ? { ...g, current: newCurrent } : g
-      ));
-    }
-  }, [goals]);
+      const { error } = await supabase
+        .from("goals")
+        .update({ current: newCurrent })
+        .eq("id", id);
 
-  // 8. Toggle task (local apenas)
+      if (!error) {
+        setGoals((previous) =>
+          previous.map((entry) =>
+            entry.id === id ? { ...entry, current: newCurrent } : entry
+          )
+        );
+      }
+    },
+    [goals]
+  );
+
   const toggleTask = useCallback((id) => {
-    setTasks(prev =>
-      prev.map(t => (t.id === id ? { ...t, done: !t.done } : t))
+    setTasks((previous) =>
+      previous.map((task) =>
+        task.id === id ? { ...task, done: !task.done } : task
+      )
     );
   }, []);
 
-  // 9. Adicionar task (local apenas)
-  const addTask = useCallback((task) => {
-    setTasks(prev => [...prev, { ...task, id: Date.now(), done: false }]);
+  const setTaskRewardMeta = useCallback((id, rewardMeta) => {
+    setTasks((previous) =>
+      previous.map((task) =>
+        task.id === id ? { ...task, reward_meta: rewardMeta } : task
+      )
+    );
   }, []);
 
-  // 10. Remover task (local apenas)
+  const addTask = useCallback((task) => {
+    setTasks((previous) => [
+      ...previous,
+      {
+        ...task,
+        id: createTaskId(),
+        done: false,
+        reward_meta: null,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+  }, []);
+
   const removeTask = useCallback((id) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    setTasks((previous) => previous.filter((task) => task.id !== id));
   }, []);
 
   const summary = {
     totalIncome: transactions
-      .filter((t) => t.type === "income")
-      .reduce((s, t) => s + t.actual, 0),
+      .filter((transaction) => transaction.type === "income")
+      .reduce((sum, transaction) => sum + transaction.actual, 0),
     totalExpense: transactions
-      .filter((t) => t.type === "expense")
-      .reduce((s, t) => s + t.actual, 0),
+      .filter((transaction) => transaction.type === "expense")
+      .reduce((sum, transaction) => sum + transaction.actual, 0),
     expectedExpense: transactions
-      .filter((t) => t.type === "expense")
-      .reduce((s, t) => s + t.expected, 0),
+      .filter((transaction) => transaction.type === "expense")
+      .reduce((sum, transaction) => sum + transaction.expected, 0),
     expectedIncome: transactions
-      .filter((t) => t.type === "income")
-      .reduce((s, t) => s + t.expected, 0),
+      .filter((transaction) => transaction.type === "income")
+      .reduce((sum, transaction) => sum + transaction.expected, 0),
   };
+
   summary.balance = summary.totalIncome - summary.totalExpense;
 
   return (
@@ -194,6 +285,7 @@ export function FinanceProvider({ children }) {
         addTransaction,
         removeTransaction,
         toggleTask,
+        setTaskRewardMeta,
         addTask,
         removeTask,
         updateGoalProgress,

@@ -1,182 +1,287 @@
-import { useContext, useState } from "react";
-import { Plus, Trash2, CheckCircle2, Circle, Clock } from "lucide-react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { Plus, Trash2, CheckCircle2, Circle, Clock, Gift } from "lucide-react";
 import { AppContext } from "../context/AppContext";
 import { FinanceContext } from "../context/FinanceContext";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 
-export function DashboardView() {
-  const { 
-    dateStr, 
-    setView, 
-    currentLevel, 
-    xpProgress, 
-    nextLevelXp, 
+export function DashboardView({ user }) {
+  const {
+    dateStr,
+    setView,
+    currentLevel,
+    xpProgress,
+    nextLevelXp,
     xpProgressPercent,
-    executeReward,
-    removeXp,
-    totalXp,
-    totalGold
+    rewardTaskCompletion,
+    rollbackTaskCompletion,
+    boxesCount,
+    boxProgress,
+    taskProgressTarget,
+    isTaskEligibleForRewards,
   } = useContext(AppContext);
-  const { tasks, toggleTask, addTask, removeTask, summary } =
+  const { tasks, toggleTask, setTaskRewardMeta, addTask, removeTask, summary } =
     useContext(FinanceContext);
   const [showAdd, setShowAdd] = useState(false);
   const [newTime, setNewTime] = useState("09:00");
   const [newLabel, setNewLabel] = useState("");
-  
-  // State para undo de desmarcações com timeout
-  const [undoAction, setUndoAction] = useState(null); // { taskId, timeoutId, message }
-  const [undoNotification, setUndoNotification] = useState(null);
+  const [rewardBursts, setRewardBursts] = useState([]);
+  const burstIdRef = useRef(0);
+  const burstTimeoutsRef = useRef(new Map());
 
-  const completed = tasks.filter((t) => t.done).length;
+  useEffect(() => {
+    const timeouts = burstTimeoutsRef.current;
+
+    return () => {
+      timeouts.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      timeouts.clear();
+    };
+  }, []);
+
+  const emitRewardBurst = (payload) => {
+    burstIdRef.current += 1;
+    const id = burstIdRef.current;
+
+    setRewardBursts((previous) => [...previous, { id, ...payload }]);
+
+    const timeoutId = window.setTimeout(() => {
+      setRewardBursts((previous) =>
+        previous.filter((entry) => entry.id !== id)
+      );
+      burstTimeoutsRef.current.delete(id);
+    }, 950);
+
+    burstTimeoutsRef.current.set(id, timeoutId);
+  };
+
+  const displayName =
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "Dev";
+
+  const completed = tasks.filter((task) => task.done).length;
   const progress = tasks.length
     ? Math.round((completed / tasks.length) * 100)
     : 0;
 
   const handleAdd = () => {
-    if (!newLabel.trim()) return;
-    addTask({ time: newTime, label: newLabel.trim() });
+    const cleanLabel = newLabel.replace(/\s+/g, " ").trim();
+
+    if (!cleanLabel) {
+      return;
+    }
+
+    addTask({ time: newTime, label: cleanLabel });
     setNewLabel("");
     setShowAdd(false);
   };
 
-  // Integração: Tarefa ➔ XP ➔ Ouro (com Undo)
-  // FLUXO: Mark = +10 XP IMEDIATO | Unmark = Agendar -10 XP em 3s com opção de desfazer
-  const handleToggleTask = (taskId) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
+  const handleToggleTask = async (taskId) => {
+    const task = tasks.find((entry) => entry.id === taskId);
 
-    // ✅ Capturar estado ANTES de fazer toggle
-    const wasDone = task.done; // true = tarefa estava marcada
-
-    // Limpar undo anterior se houver
-    if (undoAction && undoAction.taskId === taskId) {
-      clearTimeout(undoAction.timeoutId);
-      setUndoAction(null);
-      setUndoNotification(null);
+    if (!task) {
+      return;
     }
 
-    // ✅ Toggle imediato (muda o estado)
+    const nextDone = !task.done;
+
     toggleTask(taskId);
 
-    if (!wasDone) {
-      // ✅ MARCANDO (era false, agora é true) = GANHA XP IMEDIATO
-      const reward = executeReward('SIMPLE_TASK');
-      if (reward) {
-        console.log(`✅ +${reward.xp} XP: "${task.label}"`);
-      }
-    } else {
-      // ❌ DESMARCANDO (era true, agora é false) = AGENDAR -XP em 3s (com undo)
-      console.log(`⚠️ Desmarque em 3s removerá XP: "${task.label}" | XP atual: ${totalXp}`);
-      
-      const timeoutId = setTimeout(async () => {
-        console.log(`⏰ [${new Date().toLocaleTimeString()}] Trigger de remoção de XP!`);
-        console.log(`   Chamando removeXp(10) com XP atual no contexto: ${totalXp}`);
-        
-        // ✅ Chamar removeXp que vai usar o estado MAIS RECENTE
-        const rollback = await removeXp(10);
-        
-        console.log(`✅ removeXp retornou:`, rollback);
-        
-        if (rollback.success) {
-          console.log(`✅ XP REMOVIDO COM SUCESSO: "${task.label}"`);
-          console.log(`   Novo XP: ${rollback.newXp}`);
-        } else {
-          console.error(`❌ removeXp falhou:`, rollback.message);
-        }
-        
-        // Limpar notificação
-        setUndoNotification(null);
-        setUndoAction(null);
-      }, 3000);
+    if (nextDone) {
+      const reward = await rewardTaskCompletion(task);
 
-      // Mostrar notificação com opção de desfazer
-      setUndoAction({ taskId, timeoutId });
-      setUndoNotification({
-        taskId,
-        message: `Desmarque em 3s removerá -10 XP`,
-        taskName: task.label
+      if (reward?.error) {
+        toggleTask(taskId);
+        emitRewardBurst({
+          tone: "neutral",
+          label: "Sync falhou",
+          detail: "Nao foi possivel salvar no Supabase.",
+        });
+        return;
+      }
+
+      if (reward?.skipped) {
+        setTaskRewardMeta(taskId, null);
+        emitRewardBurst({
+          tone: "neutral",
+          label: "Sem XP",
+          detail: "Task vazia nao pontua.",
+        });
+        return;
+      }
+
+      if (reward?.rewardMeta) {
+        setTaskRewardMeta(taskId, reward.rewardMeta);
+      }
+
+      emitRewardBurst({
+        tone: "up",
+        xp: reward?.xp ?? 0,
+        gold: reward?.gold ?? 0,
+      });
+      return;
+    }
+
+    const rewardMeta = task.reward_meta;
+
+    if (!rewardMeta) {
+      return;
+    }
+
+    const rollback = await rollbackTaskCompletion(rewardMeta);
+
+    if (!rollback?.success) {
+      toggleTask(taskId);
+      emitRewardBurst({
+        tone: "neutral",
+        label: "Rollback falhou",
+        detail: "O estado anterior nao voltou do banco.",
+      });
+      return;
+    }
+
+    setTaskRewardMeta(taskId, null);
+
+    if (!rollback.skipped) {
+      emitRewardBurst({
+        tone: "down",
+        xp: rollback.xp ?? 0,
+        gold: rollback.gold ?? 0,
       });
     }
   };
 
-  // Função para desfazer undo (remarcar tarefa)
-  const handleUndoUnmark = (taskId) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task || undoAction?.taskId !== taskId) return;
+  const handleRemoveTask = async (task) => {
+    if (task.done && task.reward_meta) {
+      const rollback = await rollbackTaskCompletion(task.reward_meta);
 
-    // Cancelar timeout
-    clearTimeout(undoAction.timeoutId);
-    setUndoAction(null);
-    setUndoNotification(null);
+      if (!rollback?.success) {
+        emitRewardBurst({
+          tone: "neutral",
+          label: "Nao removeu",
+          detail: "Falha ao reverter a recompensa no banco.",
+        });
+        return;
+      }
 
-    // Remarcar tarefa
-    toggleTask(taskId);
-    
-    // Recuperar XP
-    const reward = executeReward('SIMPLE_TASK');
-    console.log(`🔄 Desfez desmarque: "${task.label}" | ${reward.message}`);
+      if (!rollback.skipped) {
+        emitRewardBurst({
+          tone: "down",
+          xp: rollback.xp ?? 0,
+          gold: rollback.gold ?? 0,
+        });
+      }
+    }
+
+    removeTask(task.id);
   };
 
-  const sortedTasks = [...tasks].sort((a, b) =>
-    a.time.localeCompare(b.time)
+  const sortedTasks = [...tasks].sort((left, right) =>
+    left.time.localeCompare(right.time)
   );
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
+    <div className="mx-auto max-w-4xl space-y-4 pb-24">
       <div className="pt-2 pb-1">
         <p className="text-zinc-500 text-sm capitalize">{dateStr}</p>
         <h1 className="text-2xl font-bold text-white mt-0.5">
-          Bom dia, Dev <span className="wave">👋</span>
+          Tarefas e Rotina, {displayName}
         </h1>
       </div>
 
-      {/* Level Widget */}
-      <Card className="flex items-center gap-4 border-amber-500/30">
-        <div className="relative w-16 h-16 flex items-center justify-center flex-shrink-0">
-          <svg className="absolute w-full h-full -rotate-90">
-            {/* Fundo do círculo */}
-            <circle cx="32" cy="32" r="28" fill="none" stroke="#27272a" strokeWidth="4" />
-            {/* Progresso (amarelo) */}
-            <circle 
-              cx="32" 
-              cy="32" 
-              r="28" 
-              fill="none" 
-              stroke="#f59e0b" 
+      <Card className="relative flex items-center gap-4 overflow-hidden border-amber-500/30">
+        <div className="relative flex h-16 w-16 flex-shrink-0 items-center justify-center">
+          <svg className="absolute h-full w-full -rotate-90">
+            <circle
+              cx="32"
+              cy="32"
+              r="28"
+              fill="none"
+              stroke="#27272a"
               strokeWidth="4"
-              strokeDasharray="175" 
-              strokeDashoffset={175 - (xpProgressPercent * 1.75)}
-              className="transition-all duration-1000"
+            />
+            <circle
+              cx="32"
+              cy="32"
+              r="28"
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth="4"
+              strokeDasharray="175"
+              strokeDashoffset={175 - xpProgressPercent * 1.75}
+              className="transition-all duration-300"
             />
           </svg>
           <span className="text-xl font-bold text-white">Lvl {currentLevel}</span>
         </div>
-        <div>
-          <p className="text-xs text-zinc-500 uppercase font-bold">Patente Atual</p>
-          <p className="text-sm text-amber-400 font-mono">{xpProgress} / {nextLevelXp} XP</p>
+
+        <div className="relative flex-1">
+          <p className="text-xs font-bold uppercase text-zinc-500">
+            Patente Atual
+          </p>
+          <p className="text-sm font-mono text-amber-400">
+            {xpProgress} / {nextLevelXp} XP
+          </p>
+          <p className="mt-1 text-xs text-zinc-600">
+            XP e gold sobem ou descem no mesmo clique, sem delay.
+          </p>
+
+          <div className="pointer-events-none absolute right-0 top-0 flex flex-col items-end gap-2">
+            {rewardBursts.map((burst) => {
+              const classes = {
+                up: "xp-float-up border-amber-400/35 bg-amber-500/15 text-amber-100 shadow-[0_0_28px_rgba(245,158,11,0.2)]",
+                down:
+                  "xp-float-down border-rose-400/30 bg-rose-500/10 text-rose-100 shadow-[0_0_24px_rgba(244,63,94,0.18)]",
+                neutral:
+                  "xp-float-neutral border-zinc-700 bg-zinc-900/95 text-zinc-200 shadow-[0_0_18px_rgba(24,24,27,0.45)]",
+              };
+
+              return (
+                <div
+                  key={burst.id}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold backdrop-blur-xl ${classes[burst.tone]}`}
+                >
+                  {burst.tone === "neutral" ? (
+                    <span>{burst.label}</span>
+                  ) : (
+                    <span>
+                      {burst.tone === "up" ? "+" : "-"}
+                      {burst.xp} XP • {burst.tone === "up" ? "+" : "-"}
+                      {burst.gold} Gold
+                    </span>
+                  )}
+                  {burst.detail ? (
+                    <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-white/45">
+                      {burst.detail}
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </Card>
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Card className="text-center">
-          <p className="text-[11px] text-zinc-500 mb-1">Progresso</p>
-          <p className="text-xl font-bold text-amber-400 font-mono">
+          <p className="mb-1 text-[11px] text-zinc-500">Progresso</p>
+          <p className="font-mono text-xl font-bold text-amber-400">
             {progress}%
           </p>
         </Card>
         <Card className="text-center">
-          <p className="text-[11px] text-zinc-500 mb-1">Tarefas</p>
-          <p className="text-xl font-bold text-white font-mono">
+          <p className="mb-1 text-[11px] text-zinc-500">Tarefas</p>
+          <p className="font-mono text-xl font-bold text-white">
             {completed}/{tasks.length}
           </p>
         </Card>
         <Card className="text-center" onClick={() => setView("finance")}>
-          <p className="text-[11px] text-zinc-500 mb-1">Saldo</p>
+          <p className="mb-1 text-[11px] text-zinc-500">Saldo</p>
           <p
-            className={`text-xl font-bold font-mono ${
+            className={`font-mono text-xl font-bold ${
               summary.balance >= 0 ? "text-emerald-400" : "text-red-400"
             }`}
           >
@@ -184,50 +289,40 @@ export function DashboardView() {
             {Math.abs(summary.balance).toLocaleString("pt-BR")}
           </p>
         </Card>
+        <Card
+          className="text-center border-amber-500/20"
+          onClick={() => setView("store")}
+        >
+          <p className="mb-1 text-[11px] text-zinc-500">Boxes</p>
+          <p className="flex items-center justify-center gap-1 font-mono text-xl font-bold text-amber-300">
+            <Gift size={16} /> {boxesCount}
+          </p>
+          <p className="mt-1 text-[10px] text-zinc-600">
+            {boxProgress}/{taskProgressTarget}
+          </p>
+        </Card>
       </div>
 
-      {/* Progress Bar */}
-      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+      <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
         <div
-          className="h-full bg-amber-500 rounded-full transition-all duration-700"
+          className="h-full rounded-full bg-amber-500 transition-all duration-300"
           style={{ width: `${progress}%` }}
         />
       </div>
 
-      {/* Daily Planner */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-white flex items-center gap-2">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-white">
             <Clock size={16} className="text-amber-400" /> Plano do Dia
           </h2>
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setShowAdd((v) => !v)}
+            onClick={() => setShowAdd((value) => !value)}
           >
             <Plus size={15} /> Adicionar
           </Button>
         </div>
-
-        {/* Notificação de Undo */}
-        {undoNotification && (
-          <Card className="mb-3 p-3 bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-amber-400">⏱️ Undo disponível por 3s</p>
-              <p className="text-sm text-amber-300 mt-1">
-                "{undoNotification.taskName}" será desfeito com -10 XP
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleUndoUnmark(undoNotification.taskId)}
-              className="whitespace-nowrap"
-            >
-              🔄 Desfazer
-            </Button>
-          </Card>
-        )}
 
         {showAdd && (
           <Card className="mb-3 space-y-3">
@@ -235,18 +330,21 @@ export function DashboardView() {
               <input
                 type="time"
                 value={newTime}
-                onChange={(e) => setNewTime(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 text-white rounded-xl px-3 py-2.5 text-sm font-mono w-28 outline-none focus:border-amber-500"
+                onChange={(event) => setNewTime(event.target.value)}
+                className="w-28 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm font-mono text-white outline-none focus:border-amber-500"
               />
               <input
                 type="text"
                 value={newLabel}
-                placeholder="Título do bloco..."
-                onChange={(e) => setNewLabel(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                className="flex-1 bg-zinc-800 border border-zinc-700 text-white placeholder-zinc-600 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-500"
+                placeholder="Titulo do bloco..."
+                onChange={(event) => setNewLabel(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && handleAdd()}
+                className="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-white placeholder-zinc-600 outline-none focus:border-amber-500"
               />
             </div>
+            <p className="text-xs text-zinc-500">
+              Qualquer tarefa com texto conta XP e progresso para a loot box.
+            </p>
             <div className="flex gap-2">
               <Button size="sm" onClick={handleAdd} className="flex-1">
                 Salvar
@@ -264,47 +362,54 @@ export function DashboardView() {
         )}
 
         <div className="space-y-2">
-          {sortedTasks.map((task) => (
-            <div
-              key={task.id}
-              className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all ${
-                task.done
-                  ? "bg-zinc-900/50 border-zinc-800/50 opacity-60"
-                  : "bg-zinc-900 border-zinc-800"
-              }`}
-            >
-              <button
-                onClick={() => handleToggleTask(task.id)}
-                className="text-zinc-500 hover:text-amber-400 transition-colors shrink-0"
-              >
-                {task.done ? (
-                  <CheckCircle2 size={22} className="text-amber-400" />
-                ) : (
-                  <Circle size={22} />
-                )}
-              </button>
-              <span className="font-mono text-xs text-amber-400/80 shrink-0 w-12">
-                {task.time}
-              </span>
-              <span
-                className={`flex-1 text-sm ${
+          {sortedTasks.map((task) => {
+            return (
+              <div
+                key={task.id}
+                className={`flex items-center gap-3 rounded-2xl border p-3.5 transition-all ${
                   task.done
-                    ? "line-through text-zinc-600"
-                    : "text-zinc-200"
+                    ? "border-zinc-800/50 bg-zinc-900/50 opacity-60"
+                    : "border-zinc-800 bg-zinc-900"
                 }`}
               >
-                {task.label}
-              </span>
-              <button
-                onClick={() => removeTask(task.id)}
-                className="text-zinc-700 hover:text-red-400 transition-colors shrink-0"
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          ))}
+                <button
+                  onClick={() => void handleToggleTask(task.id)}
+                  className="shrink-0 text-zinc-500 transition-colors hover:text-amber-400"
+                >
+                  {task.done ? (
+                    <CheckCircle2 size={22} className="text-amber-400" />
+                  ) : (
+                    <Circle size={22} />
+                  )}
+                </button>
+                <span className="w-12 shrink-0 font-mono text-xs text-amber-400/80">
+                  {task.time}
+                </span>
+                <div className="flex flex-1 items-center gap-2">
+                  <span
+                    className={`text-sm ${
+                      task.done ? "text-zinc-600 line-through" : "text-zinc-200"
+                    }`}
+                  >
+                    {task.label}
+                  </span>
+                  {!isTaskEligibleForRewards(task) && (
+                    <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                      Sem XP
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => void handleRemoveTask(task)}
+                  className="shrink-0 text-zinc-700 transition-colors hover:text-red-400"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            );
+          })}
           {tasks.length === 0 && (
-            <div className="text-center py-8 text-zinc-600 text-sm">
+            <div className="py-8 text-center text-sm text-zinc-600">
               Nenhuma tarefa. Adicione seu plano do dia!
             </div>
           )}

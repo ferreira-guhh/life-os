@@ -144,7 +144,7 @@ const exportGoalsToCSV = (goals, fileName) => {
 };
 
 export function FinanceView() {
-  const { transactions, addTransaction, removeTransaction, summary, goals, updateGoalProgress, addGoal, removeGoal } = useContext(FinanceContext);
+  const { transactions, addTransaction, removeTransaction, goals, updateGoalProgress, addGoal, removeGoal } = useContext(FinanceContext);
   const [activeTab, setActiveTab] = useState('overview'); // overview, transactions, goals
   const [showForm, setShowForm] = useState(false);
   const [showGoalForm, setShowGoalForm] = useState(false);
@@ -164,8 +164,8 @@ export function FinanceView() {
 
   const chartData = filteredTransactions.map(t => ({
     name: t.label.length > 8 ? t.label.slice(0, 8) + "…" : t.label,
-    Esperado: t.expected,
-    Real: t.actual,
+    Esperado: Number(t.expected ?? 0),
+    Real: Number(t.actual ?? 0),
     type: t.type,
   }));
 
@@ -173,27 +173,30 @@ export function FinanceView() {
     .filter(t => t.type === 'expense')
     .reduce((acc, t) => {
       const found = acc.find(item => item.name === t.category);
-      if (found) { found.value += t.actual; }
-      else { acc.push({ name: t.category, value: t.actual }); }
+      if (found) { found.value += Number(t.actual ?? 0); }
+      else { acc.push({ name: t.category, value: Number(t.actual ?? 0) }); }
       return acc;
     }, []);
 
   // Recalcula o resumo apenas para o mês filtrado
   const monthlySummary = {
-    income: filteredTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.actual, 0),
-    expense: filteredTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.actual, 0),
-    expectedIncome: filteredTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.expected, 0),
-    expectedExpense: filteredTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.expected, 0),
+    income: filteredTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + Number(t.actual ?? 0), 0),
+    expense: filteredTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.actual ?? 0), 0),
+    expectedIncome: filteredTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + Number(t.expected ?? 0), 0),
+    expectedExpense: filteredTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.expected ?? 0), 0),
   };
   monthlySummary.balance = monthlySummary.income - monthlySummary.expense;
 
   const handleAdd = () => {
-    if (!form.label || !form.expected || !form.actual) return;
+    const cleanLabel = form.label.trim();
+
+    if (!cleanLabel || !form.actual) return;
+
     addTransaction({
-      label: form.label,
+      label: cleanLabel,
       type: form.type,
       category: form.category,
-      expected: parseFloat(form.expected),
+      expected: form.expected ? parseFloat(form.expected) : 0,
       actual: parseFloat(form.actual),
     });
     setForm({ label: "", type: "expense", expected: "", actual: "", category: "essencial" });
@@ -456,14 +459,14 @@ export function FinanceView() {
                     <div className="grid grid-cols-2 gap-3">
                       <input
                         type="number"
-                        placeholder="Esperado (R$)"
+                        placeholder="Esperado (R$) opcional"
                         value={form.expected}
                         onChange={e => setForm(f => ({ ...f, expected: e.target.value }))}
                         className="bg-zinc-800 border border-zinc-700 text-white placeholder-zinc-600 rounded-2xl px-4 py-4 text-sm outline-none focus:border-amber-500"
                       />
                       <input
                         type="number"
-                        placeholder="Real (R$)"
+                        placeholder="Real (R$) obrigatório"
                         value={form.actual}
                         onChange={e => setForm(f => ({ ...f, actual: e.target.value }))}
                         className="bg-zinc-800 border border-zinc-700 text-white placeholder-zinc-600 rounded-2xl px-4 py-4 text-sm outline-none focus:border-amber-500"
@@ -492,17 +495,17 @@ export function FinanceView() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-zinc-200 truncate">{tx.label}</p>
                     <p className="text-xs text-zinc-500">
-                      Esperado: R${tx.expected.toLocaleString("pt-BR")}
+                      Esperado: {tx.expected ? `R$${Number(tx.expected).toLocaleString("pt-BR")}` : "Não definido"}
                     </p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className={`text-sm font-bold font-mono ${
                       tx.type === "income" ? "text-emerald-400" : "text-red-400"
                     }`}>
-                      {tx.type === "income" ? "+" : "-"}R${tx.actual.toLocaleString("pt-BR")}
+                      {tx.type === "income" ? "+" : "-"}R${Number(tx.actual ?? 0).toLocaleString("pt-BR")}
                     </p>
-                    {tx.type === "expense" && tx.actual > tx.expected && (
-                      <Badge variant="red">+R${(tx.actual - tx.expected).toLocaleString("pt-BR")}</Badge>
+                    {tx.type === "expense" && Number(tx.actual ?? 0) > Number(tx.expected ?? 0) && (
+                      <Badge variant="red">+R${(Number(tx.actual ?? 0) - Number(tx.expected ?? 0)).toLocaleString("pt-BR")}</Badge>
                     )}
                   </div>
                   <button
