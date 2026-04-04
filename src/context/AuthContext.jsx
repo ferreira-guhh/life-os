@@ -3,6 +3,12 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 const AuthContext = createContext(null);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (value) => typeof value === "string" && UUID_PATTERN.test(value);
+
+const toAppError = (error, fallbackMessage) =>
+  error instanceof Error ? error : new Error(fallbackMessage);
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -72,27 +78,64 @@ export function AuthProvider({ children }) {
   const handleSignUp = async ({ fullName, email, password }) => {
     setPendingAction("signup");
 
-    const cleanFullName = fullName.trim();
+    try {
+      const cleanFullName = fullName.trim();
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: cleanFullName,
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: cleanFullName,
+          },
         },
-      },
-    });
+      });
 
-    if (error) {
-      setPendingAction(null);
-      return { error };
-    }
+      if (error) {
+        return { error };
+      }
 
-    if (data.user) {
-      const { error: profileError } = await supabase.from("profiles").upsert(
-        {
-          id: data.user.id,
+      const createdUser = data?.user ?? null;
+      const userId = createdUser?.id ?? null;
+      const hasIdentities =
+        !Array.isArray(createdUser?.identities) || createdUser.identities.length > 0;
+
+      if (!createdUser || !userId) {
+        console.error("Cadastro sem user valido retornado pelo Supabase:", {
+          data,
+        });
+
+        return {
+          error: new Error("Nao foi possivel confirmar a criacao do usuario."),
+        };
+      }
+
+      if (!data.session && !hasIdentities) {
+        console.error("Supabase nao confirmou a criacao real do usuario:", {
+          data,
+        });
+
+        return {
+          error: new Error(
+            "Nao foi possivel confirmar a criacao do usuario. Esse email pode ja estar cadastrado."
+          ),
+        };
+      }
+
+      if (!isUuid(userId)) {
+        console.error("Supabase retornou um user.id invalido para profiles:", {
+          userId,
+          user: createdUser,
+        });
+
+        return {
+          error: new Error("O identificador do usuario retornado nao eh um UUID valido."),
+        };
+      }
+
+      try {
+        const { error: profileError } = await supabase.from("profiles").insert({
+          id: userId,
           full_name: cleanFullName,
           xp: 0,
           level: 1,
@@ -108,29 +151,42 @@ export function AuthProvider({ children }) {
           onboarding_completed: false,
           productive_period: null,
           focus_area: null,
-        },
-        {
-          onConflict: "id",
+        });
+
+        if (profileError) {
+          console.error("Erro ao criar profile apos signUp:", {
+            code: profileError.code,
+            message: profileError.message,
+            details: profileError.details,
+            hint: profileError.hint,
+            userId,
+          });
+
+          return { error: profileError };
         }
-      );
+      } catch (databaseError) {
+        console.error("Excecao inesperada ao criar profile apos signUp:", {
+          userId,
+          databaseError,
+        });
 
-      if (profileError) {
-        setPendingAction(null);
-        return { error: profileError };
+        return {
+          error: toAppError(databaseError, "Erro inesperado ao criar o perfil."),
+        };
       }
+
+      if (data.session) {
+        setSession(data.session);
+        setUser(data.session.user);
+      }
+
+      return {
+        error: null,
+        requiresEmailConfirmation: !data.session,
+      };
+    } finally {
+      setPendingAction(null);
     }
-
-    if (data.session) {
-      setSession(data.session);
-      setUser(data.session.user);
-    }
-
-    setPendingAction(null);
-
-    return {
-      error: null,
-      requiresEmailConfirmation: !data.session,
-    };
   };
 
   const handleSignOut = async () => {
